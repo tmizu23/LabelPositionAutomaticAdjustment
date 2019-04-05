@@ -330,9 +330,22 @@ def adjust_text(layer,canvas,force_push=1e-6, force_pull=1e-2, maxiter=2000):
     bboxes = transform_coord(bboxes,extent,normalized=False)
     move_texts(layer,canvas,bboxes)
 
-def set_position_column(layer):
-    # pc = QgsPropertyCollection('qpc')
+def is_prepared_label(layer):
+    result = True
+    subProviderIds = layer.labeling().subProviders()
+    palyr = QgsPalLayerSettings(layer.labeling().settings(subProviderIds[0]))
+    pc = palyr.dataDefinedProperties()
+    if not layer.labelsEnabled():
+        result = False
+    if not pc.isActive(9) or not pc.isActive(10):
+        result = False
+    if pc.property(9).asExpression() != '"auxiliary_storage_labeling_positionx"':
+        result = False
+    if pc.property(10).asExpression() != '"auxiliary_storage_labeling_positiony"':
+        result = False
+    return result
 
+def set_position_column(layer):
     subProviderIds = layer.labeling().subProviders()
     palyr = QgsPalLayerSettings(layer.labeling().settings(subProviderIds[0]))
     pc = palyr.dataDefinedProperties()
