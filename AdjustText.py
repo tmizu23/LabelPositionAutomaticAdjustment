@@ -1,15 +1,18 @@
 # -*- coding: utf-8 -*-
+from builtins import zip
+from builtins import range
+from qgis.PyQt.QtCore import *
+from qgis.PyQt.QtWidgets import *
+from qgis.PyQt.QtGui import *
 from qgis.core import *
 from qgis.gui import *
 from qgis.utils import *
-from PyQt4.QtCore import *
 import numpy as np
 import math
 import sys
 
-
 def log(msg):
-    QgsMessageLog.logMessage(msg, 'MyPlugin', QgsMessageLog.INFO)
+    QgsMessageLog.logMessage(msg, 'MyPlugin')
 
 def approximately_equal(x1, x2):
     return abs(x2 - x1) < sys.float_info.epsilon * 100
@@ -30,22 +33,21 @@ def move_texts(layer,canvas,bboxes):
         #log("{}".format(featureId))
 
 def set_label_position(layer,canvas,featureId, x, y):
-    projectCRSSrsid = canvas.mapSettings().destinationCrs().srsid()
-    layerCRSSrsid = layer.crs().srsid()
-    if projectCRSSrsid != layerCRSSrsid:
-        crs_trans = QgsCoordinateTransform(projectCRSSrsid, layerCRSSrsid)
-        p = crs_trans.transform(QgsPoint(x, y))
+    projectCRS = canvas.mapSettings().destinationCrs()
+    layerCRS = layer.crs()
+    if projectCRS.srsid() != layerCRS.srsid():
+        crs_trans = QgsCoordinateTransform(projectCRS, layerCRS, QgsProject.instance())
+        p = crs_trans.transform(QgsPointXY(x, y))
         x, y = p[0], p[1]
 
     feature = getFeatureById(layer, featureId)
     layer.startEditing()
-    feature['label_x'] = round(x, 10)
-    feature['label_y'] = round(y, 10)
+    feature["auxiliary_storage_labeling_positionx"] = round(x, 10)
+    feature["auxiliary_storage_labeling_positiony"] = round(y, 10)
     layer.updateFeature(feature)
     layer.commitChanges()
     # feature = getFeatureById(layer, text.featureId)
     # log("setx:{},sety:{}".format(x, y))
-
 
 def normalized_point_position(layer,text,extent):
     # [0,1]に正規化されたデータポイントの位置を返す
@@ -115,7 +117,6 @@ def get_bboxes(texts, expand):
     #     log("{},xmin:{},xmax:{},ymin:{},ymax:{}".format(bbox["label"],bbox["xmin"],bbox["xmax"],bbox["ymin"],bbox["ymax"]))
     return bboxes
 
-
 def get_dboxes(points, padding):
     # ポイントのpadding付きの範囲を取得
     dboxes = [{'xmin': xy[0] - padding[0],
@@ -127,8 +128,6 @@ def get_dboxes(points, padding):
     # for bbox in dboxes:
     #     log("dbox:::xmin:{},xmax:{},ymin:{},ymax:{}".format(bbox["xmin"],bbox["xmax"],bbox["ymin"],bbox["ymax"]))
     return dboxes
-
-
 
 def get_midpoint(bbox):
     cx = (bbox["xmin"] + bbox["xmax"]) / 2
@@ -211,12 +210,10 @@ def put_within_bounds(bbox, xlim, ylim):
 
     return bbox
 
-
 def spring_force(a, b, force=0.000001):
     v = (a - b)
     f = force * v
     return f
-
 
 def repel_force(a, b, force=0.000001):
     dx = math.fabs(a[0] - b[0])
@@ -232,8 +229,6 @@ def repel_force(a, b, force=0.000001):
     else:
         f[0] = f[0] * 2
     return f
-
-
 
 def adjust_text(layer,canvas,force_push=1e-6, force_pull=1e-2, maxiter=2000):
     if layer is None:
@@ -335,35 +330,23 @@ def adjust_text(layer,canvas,force_push=1e-6, force_pull=1e-2, maxiter=2000):
     bboxes = transform_coord(bboxes,extent,normalized=False)
     move_texts(layer,canvas,bboxes)
 
-
 def set_position_column(layer):
-    palyr = QgsPalLayerSettings()
-    palyr.readFromLayer(layer)
-    palyr.enabled = True
-    palyr.drawLabels = True
-    palyr.setDataDefinedProperty(QgsPalLayerSettings.Hali, True, True, "'center'", "halign")
-    palyr.setDataDefinedProperty(QgsPalLayerSettings.Vali, True, True, "'center'", "valign")
-    # 位置の設定
-    palyr.setDataDefinedProperty(QgsPalLayerSettings.PositionX, True, False, "", "label_x")
-    palyr.setDataDefinedProperty(QgsPalLayerSettings.PositionY, True, False, "", "label_y")
-    palyr.writeToLayer(layer)
+    # pc = QgsPropertyCollection('qpc')
 
-def add_label_xy_column(layer):
-    if layer is not None:
-        layer.startEditing()
-        pr = layer.dataProvider()
+    subProviderIds = layer.labeling().subProviders()
+    palyr = QgsPalLayerSettings(layer.labeling().settings(subProviderIds[0]))
+    pc = palyr.dataDefinedProperties()
+    # 9: '"auxiliary_storage_labeling_positionx"',
+    # 10: '"auxiliary_storage_labeling_positiony"',
+    sp = {11: "'Center'", 12: "'Half'"}
+    for k, v in sp.items():
+        x = QgsProperty()
+        x.setExpressionString(v)
+        pc.setProperty(k, x)
 
-        for col in ['label_x', 'label_y']:
-            idx = layer.fieldNameIndex(col)
-            if idx != -1:
-                pr.deleteAttributes([layer.fieldNameIndex(col)])
-                layer.updateFields()
-        pr.addAttributes(
-            [QgsField('label_y', QVariant.Double, 'double', 20, 10), QgsField('label_x', QVariant.Double, 'double', 20, 10)])
-        layer.updateFields()
-        layer.commitChanges()
-
-
+    palyr.setDataDefinedProperties(pc)
+    layer.setLabeling(QgsVectorLayerSimpleLabeling(palyr))
+    layer.setLabelsEnabled(True)
 
 def reset_label_position(layer,canvas):
     if layer is not None:
@@ -374,13 +357,12 @@ def reset_label_position(layer,canvas):
         for feature in features:
             try:
                 p = feature.geometry().asPoint()
-                feature["label_x"] = round(p[0], 10)
-                feature["label_y"] = round(p[1], 10)
+                feature["auxiliary_storage_labeling_positionx"] = round(p[0], 10)
+                feature["auxiliary_storage_labeling_positiony"] = round(p[1], 10)
                 layer.updateFeature(feature)
             except:
                 pass
         layer.commitChanges()
-
 
 def get_features_within_canvas(layer,canvas):
     region = canvas.extent().asWktPolygon()
@@ -389,24 +371,8 @@ def get_features_within_canvas(layer,canvas):
     features = layer.getFeatures(QgsFeatureRequest(expression))
     return features
 
-
 def set_label_style(qml,layer):
     if layer is not None:
         # レイヤのラベルプロパティの設定。値で定義された式を設定
-        layer.loadNamedStyle(qml)
+        layer.loadNamedStyle(qml, True, QgsMapLayer.StyleCategory.Symbology)
         layer.setCustomProperty("labeling/isExpression", True)
-
-# canvas = iface.mapCanvas()
-# layer = iface.activeLayer()
-# if Add_Label_XY_Column:
-#     #レイヤにラベル用の座標列を追加
-#     add_label_xy_column()
-#     reset_label_position()
-#     set_label_style()
-#     set_position_column()
-# if Reset_Label_Position:
-#     #ラベルの場所をリセット
-#     reset_label_position()
-# if Adjust_Text:
-#     #ラベルの場所を調整
-#     adjust_text()

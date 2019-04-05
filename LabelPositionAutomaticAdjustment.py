@@ -1,39 +1,18 @@
 # -*- coding: utf-8 -*-
-"""
-/***************************************************************************
- LabelPositionAutomaticAdjustment
-                                 A QGIS plugin
- This is LabelPositionAutomaticAdjustment Plugin.
-                              -------------------
-        begin                : 2013-12-20
-        copyright            : (C) 2013 by Takayuki Miutani
-        email                : mizutani.takayuki+oppai@gmail.com
- ***************************************************************************/
 
-/***************************************************************************
- *                                                                         *
- *   This program is free software; you can redistribute it and/or modify  *
- *   it under the terms of the GNU General Public License as published by  *
- *   the Free Software Foundation; either version 2 of the License, or     *
- *   (at your option) any later version.                                   *
- *                                                                         *
- ***************************************************************************/
-"""
+from __future__ import absolute_import
 # Import the PyQt and QGIS libraries
-from PyQt4.QtCore import *
-from PyQt4.QtGui import *
+from builtins import object
+from qgis.PyQt.QtCore import *
+from qgis.PyQt.QtWidgets import *
+from qgis.PyQt.QtGui import *
 from qgis.core import *
-# Initialize Qt resources from file resources.py
-import resources_rc
-# Import the code for the dialog
-from LabelPositionAutomaticAdjustmentDialog import LabelPositionAutomaticAdjustmentDialog
+from qgis.gui import *
+from . import resources_rc
+from .LabelPositionAutomaticAdjustmentDialog import LabelPositionAutomaticAdjustmentDialog
 import os.path
 
-#import os,sys
-#sys.path.append(os.path.dirname(os.path.abspath(__file__)) + os.path.sep + "pycharm-debug.egg")
-#import pydevd
-
-class LabelPositionAutomaticAdjustment:
+class LabelPositionAutomaticAdjustment(object):
 
     def __init__(self, iface):
         # Save reference to the QGIS interface
@@ -63,8 +42,9 @@ class LabelPositionAutomaticAdjustment:
         self.action.triggered.connect(self.run)
 
         # Add toolbar button and menu item
-        self.iface.addToolBarIcon(self.action)
+        self.iface.mainWindow().findChild(QToolBar, 'mLabelToolBar').addAction(self.action)
         self.iface.addPluginToMenu(u"&LabelPositionAutomaticAdjustment", self.action)
+
 
     def unload(self):
         # Remove the plugin menu item and icon
