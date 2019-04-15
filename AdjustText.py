@@ -29,7 +29,7 @@ def move_texts(layer,canvas,bboxes):
         featureId = bbox['featureId']
         x = bbox['orgx']
         y = bbox['orgy']
-        set_label_position(layer,canvas,featureId, x, y)
+        set_label_position(layer,canvas,featureId, float(x), float(y))
         #log("{}".format(featureId))
 
 def set_label_position(layer,canvas,featureId, x, y):
@@ -46,8 +46,33 @@ def set_label_position(layer,canvas,featureId, x, y):
     feature["auxiliary_storage_labeling_positiony"] = round(y, 10)
     layer.updateFeature(feature)
     layer.commitChanges()
+
+    # layer.startEditing()
+    # for feature in features:
+    #     try:
+    #         p = feature.geometry().asPoint()
+    #         feature["auxiliary_storage_labeling_positionx"] = round(p[0], 10)
+    #         feature["auxiliary_storage_labeling_positiony"] = round(p[1], 10)
+    #         layer.updateFeature(feature)
+    #     except:
+    #         pass
+    # layer.commitChanges()
+    # auxLayer = layer.auxiliaryLayer()
+    # auxFields = auxLayer.fields()
+    #
+    # for feature in layer.getFeatures():
+    #     auxFeature = QgsFeature(auxFields)
+    #     attribs = {
+    #         'ASPK': feature.attribute('fid'),
+    #         'labeling_labelrotation': feature.attribute('myrotation'),
+    #         'labeling_size': feature.attribute('mysize'),
+    #         'labeling_buffersize': feature.attribute('mysize') / 8
+    #     }
+    #     for key in attribs:
+    #         auxFeature[key] = attribs[key]
+    #     auxLayer.addFeature(auxFeature)
     # feature = getFeatureById(layer, text.featureId)
-    # log("setx:{},sety:{}".format(x, y))
+    log("setx:{},sety:{}".format(x, y))
 
 def normalized_point_position(layer,text,extent):
     # [0,1]に正規化されたデータポイントの位置を返す
