@@ -10,9 +10,7 @@ from qgis.utils import *
 import numpy as np
 import math
 import sys
-
-def log(msg):
-    QgsMessageLog.logMessage(msg, 'MyPlugin')
+import os
 
 def approximately_equal(x1, x2):
     return abs(x2 - x1) < sys.float_info.epsilon * 100
@@ -46,33 +44,6 @@ def set_label_position(layer,canvas,featureId, x, y):
     feature["auxiliary_storage_labeling_positiony"] = round(y, 10)
     layer.updateFeature(feature)
     layer.commitChanges()
-
-    # layer.startEditing()
-    # for feature in features:
-    #     try:
-    #         p = feature.geometry().asPoint()
-    #         feature["auxiliary_storage_labeling_positionx"] = round(p[0], 10)
-    #         feature["auxiliary_storage_labeling_positiony"] = round(p[1], 10)
-    #         layer.updateFeature(feature)
-    #     except:
-    #         pass
-    # layer.commitChanges()
-    # auxLayer = layer.auxiliaryLayer()
-    # auxFields = auxLayer.fields()
-    #
-    # for feature in layer.getFeatures():
-    #     auxFeature = QgsFeature(auxFields)
-    #     attribs = {
-    #         'ASPK': feature.attribute('fid'),
-    #         'labeling_labelrotation': feature.attribute('myrotation'),
-    #         'labeling_size': feature.attribute('mysize'),
-    #         'labeling_buffersize': feature.attribute('mysize') / 8
-    #     }
-    #     for key in attribs:
-    #         auxFeature[key] = attribs[key]
-    #     auxLayer.addFeature(auxFeature)
-    # feature = getFeatureById(layer, text.featureId)
-    log("setx:{},sety:{}".format(x, y))
 
 def normalized_point_position(layer,text,extent):
     # [0,1]に正規化されたデータポイントの位置を返す
@@ -357,9 +328,14 @@ def adjust_text(layer,canvas,force_push=1e-6, force_pull=1e-2, maxiter=2000):
 
 def is_prepared_label(layer):
     result = True
-    subProviderIds = layer.labeling().subProviders()
+    labeling = layer.labeling()
+    if labeling is None:
+        return False
+
+    subProviderIds = labeling.subProviders()
     palyr = QgsPalLayerSettings(layer.labeling().settings(subProviderIds[0]))
     pc = palyr.dataDefinedProperties()
+
     if not layer.labelsEnabled():
         result = False
     if not pc.isActive(9) or not pc.isActive(10):
@@ -367,6 +343,8 @@ def is_prepared_label(layer):
     if pc.property(9).asExpression() != '"auxiliary_storage_labeling_positionx"':
         result = False
     if pc.property(10).asExpression() != '"auxiliary_storage_labeling_positiony"':
+        result = False
+    if layer.fields().lookupField("auxiliary_storage_labeling_positionx") == -1:
         result = False
     return result
 
@@ -376,7 +354,7 @@ def set_position_column(layer):
     pc = palyr.dataDefinedProperties()
     # 9: '"auxiliary_storage_labeling_positionx"',
     # 10: '"auxiliary_storage_labeling_positiony"',
-    sp = {11: "'Center'", 12: "'Half'"}
+    sp = {11: "case when \"auxiliary_storage_labeling_positionx\" < $x THEN 'right' ELSE 'left' END", 12: "case when \"auxiliary_storage_labeling_positiony\" < $y THEN 'Top' ELSE 'Bottom' END"}
     for k, v in sp.items():
         x = QgsProperty()
         x.setExpressionString(v)
@@ -409,8 +387,30 @@ def get_features_within_canvas(layer,canvas):
     features = layer.getFeatures(QgsFeatureRequest(expression))
     return features
 
-def set_label_style(qml,layer):
+def set_label_style(layer, qml):
     if layer is not None:
         # レイヤのラベルプロパティの設定。値で定義された式を設定
         layer.loadNamedStyle(qml, True, QgsMapLayer.StyleCategory.Symbology)
+        layer.loadNamedStyle(qml, True, QgsMapLayer.StyleCategory.Labeling)
         layer.setCustomProperty("labeling/isExpression", True)
+
+def set_label_column(layer, name):
+    subProviderIds = layer.labeling().subProviders()
+    palyr = QgsPalLayerSettings(layer.labeling().settings(subProviderIds[0]))
+    palyr.drawLabels = True
+    palyr.fieldName = name
+    layer.setLabeling(QgsVectorLayerSimpleLabeling(palyr))
+    layer.setLabelsEnabled(True)
+
+def apply_style(layer):
+    col_list = layer.fields().names()
+    column, ok = QInputDialog.getItem(QInputDialog(), "Select Label Column", "Column:", col_list, 0, False)
+    if ok:
+        qml = os.path.dirname(os.path.abspath(__file__)) + os.path.sep + "label.qml"
+        set_label_style(layer, qml)
+        set_label_column(layer, column)
+        #change label name
+        layer.triggerRepaint()
+
+def log(msg):
+    QgsMessageLog.logMessage(msg, 'MyPlugin',Qgis.Info)
