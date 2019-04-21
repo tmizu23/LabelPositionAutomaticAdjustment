@@ -8,9 +8,16 @@ from qgis.core import *
 from qgis.gui import *
 from qgis.utils import *
 import numpy as np
+from scipy.cluster.vq import vq, kmeans, whiten
+from sklearn import cluster, preprocessing, mixture #機械学習用のライブラリを利用
+
+import pyclustering
+from pyclustering.cluster import xmeans
+
 import math
 import sys
 import os
+import time
 
 def approximately_equal(x1, x2):
     return abs(x2 - x1) < sys.float_info.epsilon * 100
@@ -80,7 +87,7 @@ def transform_coord(bboxes,extent,normalized,random=None):
     ymin, ymax = extent.yMinimum(),extent.yMaximum()
     if normalized:
         for i in range(len(bboxes)):
-            bboxes[i]['orgx'] = (bboxes[i]['orgx'] -xmin) / (xmax - xmin) + random[i]
+            bboxes[i]['orgx'] = (bboxes[i]['orgx'] - xmin) / (xmax - xmin) + random[i]
             bboxes[i]['orgy'] = (bboxes[i]['orgy'] - ymin) / (ymax - ymin) + random[i]
             bboxes[i]['xmin'] = (bboxes[i]['xmin'] - xmin) / (xmax - xmin) + random[i]
             bboxes[i]['xmax'] = (bboxes[i]['xmax'] - xmin) / (xmax - xmin) + random[i]
@@ -226,7 +233,22 @@ def repel_force(a, b, force=0.000001):
         f[0] = f[0] * 2
     return f
 
-def adjust_text(layer,canvas,force_push=1e-6, force_pull=1e-2, maxiter=2000):
+def show_centroid(canvas, point,extent):
+
+    xmin, xmax = extent.xMinimum(),extent.xMaximum()
+    ymin, ymax = extent.yMinimum(),extent.yMaximum()
+    px = point[0] * (xmax - xmin) + xmin
+    py = point[1] * (ymax - ymin) + ymin
+
+    marker = QgsVertexMarker(canvas)
+    marker.setIconType(QgsVertexMarker.ICON_BOX)
+    marker.setColor(QColor(0, 0, 255))
+    marker.setPenWidth(2)
+    marker.setIconSize(10)
+    marker.setCenter(QgsPointXY(px, py))
+
+def adjust_text(layer,canvas,force_push=1e-6, force_pull=1e-2, maxiter=100):
+    t1 = time.time()
     if layer is None:
         return
 
@@ -244,18 +266,54 @@ def adjust_text(layer,canvas,force_push=1e-6, force_pull=1e-2, maxiter=2000):
 
     #点の座標
     points = np.array([normalized_point_position(layer,text,extent) for text in texts])
+
+    #### x-means
+    # init_center = xmeans.kmeans_plusplus_initializer(points, 2).initialize()  # 初期値決定　今回は、初期クラスタ2です
+    # xm = xmeans.xmeans(points, init_center, ccore=False)
+    # xm.process()  # クラスタリングします
+    # clusters = xm.get_clusters()
+    # cluster_centers = xm.get_centers()
+
+    #### k-means
+    input, ok = QInputDialog.getInt(QInputDialog(), "Enter Class Num", "'Number'", 4,1)
+    if ok:
+        cluster_centers, distortion = kmeans(points, int(input))
+        codes, error = vq(points, cluster_centers)
+        delta = points - cluster_centers[codes]
+        log("{}".format(delta))
+        bboxes = set_bboxes(bboxes,delta[:,0],delta[:,1])
+
+    else:
+        return
+
+    #### MeanShift
+    # ms = cluster.MeanShift()
+    # ms.fit(points)
+    # labels = ms.labels_
+    # cluster_centers = ms.cluster_centers_
+
+    log("c:{}".format(cluster_centers))
+    # 重心表示リセット
+    vertex_items = [i for i in canvas.scene().items() if issubclass(type(i), QgsVertexMarker)]
+    for ver in vertex_items:
+        if ver in canvas.scene().items():
+            iface.mapCanvas().scene().removeItem(ver)
+    # 重心表示
+    for point in cluster_centers:
+        show_centroid(canvas, point, extent)
+
     dboxes = get_dboxes(points, padding=(1e-2, 1e-2))
     n_points = len(points)
     orig_cent = np.array([(bbox['orgx'],bbox['orgy']) for bbox in bboxes])
+
     #log("len:{}".format(len(points)))
     velocities = np.array([[0.0,0.0]]*n_texts)
     velocity_decay = 0.7
     iter = 0
     any_overlaps = True
     i_overlaps = True
-
+    log("timeA:{}".format(time.time() - t1))
     while (any_overlaps and iter < maxiter):
-        #log("iter:{}".format(iter))
         iter = iter + 1
         any_overlaps = False
         # The forces get weaker over time.
@@ -321,10 +379,12 @@ def adjust_text(layer,canvas,force_push=1e-6, force_pull=1e-2, maxiter=2000):
                             #log("interB")
                             bboxes[i] = set_bbox(bboxes[i],spring_force(cj, ci, 1.25))
                             bboxes[j] = set_bbox(bboxes[j],spring_force(ci, cj, 1.25))
-
-
+    log("iter:{}".format(iter))
+    log("timeB:{}".format(time.time() - t1))
     bboxes = transform_coord(bboxes,extent,normalized=False)
+    log("timeC:{}".format(time.time() - t1))
     move_texts(layer,canvas,bboxes)
+    log("timeD:{}".format(time.time() - t1))
 
 def is_prepared_label(layer):
     result = True
@@ -354,7 +414,8 @@ def set_position_column(layer):
     pc = palyr.dataDefinedProperties()
     # 9: '"auxiliary_storage_labeling_positionx"',
     # 10: '"auxiliary_storage_labeling_positiony"',
-    sp = {11: "case when \"auxiliary_storage_labeling_positionx\" < $x THEN 'right' ELSE 'left' END", 12: "case when \"auxiliary_storage_labeling_positiony\" < $y THEN 'Top' ELSE 'Bottom' END"}
+    #sp = {11: "case when \"auxiliary_storage_labeling_positionx\" < $x THEN 'right' ELSE 'left' END", 12: "case when \"auxiliary_storage_labeling_positiony\" < $y THEN 'Top' ELSE 'Bottom' END"}
+    sp = {11: "'center'", 12:"'Half'"}
     for k, v in sp.items():
         x = QgsProperty()
         x.setExpressionString(v)
