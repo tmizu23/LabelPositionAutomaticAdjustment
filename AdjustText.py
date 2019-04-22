@@ -266,6 +266,14 @@ def initialize_by_cluster(canvas, extent, points, bboxes, center_num):
 
     return bboxes
 
+def selectLayerLabel(layer,texts):
+    layer_texts=[]
+    for text in texts:
+        result = getFeatureById(layer, text.featureId)
+        if result is not None:
+            layer_texts.append(text)
+    return layer_texts
+
 def adjust_text(layer,canvas,center_num=1,force_push=1e-6, force_pull=1e-2, maxiter=50):
     t1 = time.time()
     if layer is None:
@@ -275,7 +283,7 @@ def adjust_text(layer,canvas,center_num=1,force_push=1e-6, force_pull=1e-2, maxi
     lr = canvas.labelingResults()
     extent = canvas.extent()
     texts = lr.labelsWithinRect(extent)
-
+    texts = selectLayerLabel(layer,texts)
     n_texts = len(texts)
     r = np.random.normal(0, force_push, n_texts)
     bboxes = get_bboxes(texts, expand=(1.05, 1.2))
@@ -371,7 +379,7 @@ def adjust_text(layer,canvas,center_num=1,force_push=1e-6, force_pull=1e-2, maxi
     bboxes = transform_coord(bboxes,extent,normalized=False)
     move_texts(layer,canvas,bboxes)
     set_position_column(layer, type="expression")
-    #log("timeD:{}".format(time.time() - t1))
+    log("timeD:{}".format(time.time() - t1))
 
 def is_prepared_label(layer):
     result = True
