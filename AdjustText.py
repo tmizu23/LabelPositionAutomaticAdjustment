@@ -9,10 +9,9 @@ from qgis.gui import *
 from qgis.utils import *
 import numpy as np
 from scipy.cluster.vq import vq, kmeans, whiten
-from sklearn import cluster, preprocessing, mixture #機械学習用のライブラリを利用
-
-import pyclustering
-from pyclustering.cluster import xmeans
+#from sklearn import cluster, preprocessing, mixture #機械学習用のライブラリを利用
+#import pyclustering
+#from pyclustering.cluster import xmeans
 
 import math
 import sys
@@ -247,7 +246,27 @@ def show_centroid(canvas, point,extent):
     marker.setIconSize(10)
     marker.setCenter(QgsPointXY(px, py))
 
-def adjust_text(layer,canvas,force_push=1e-6, force_pull=1e-2, maxiter=100):
+def initialize_by_cluster(canvas, extent, points, bboxes, center_num):
+    #### k-means
+    cluster_centers, distortion = kmeans(points, int(center_num))
+    codes, error = vq(points, cluster_centers)
+    delta = (points - cluster_centers[codes])/5.0
+    #log("{}".format(delta))
+    bboxes = set_bboxes(bboxes, delta[:, 0], delta[:, 1])
+
+    # #log("c:{}".format(cluster_centers))
+    # # 重心表示リセット
+    # vertex_items = [i for i in canvas.scene().items() if issubclass(type(i), QgsVertexMarker)]
+    # for ver in vertex_items:
+    #     if ver in canvas.scene().items():
+    #         iface.mapCanvas().scene().removeItem(ver)
+    # # 重心表示
+    # for point in cluster_centers:
+    #     show_centroid(canvas, point, extent)
+
+    return bboxes
+
+def adjust_text(layer,canvas,center_num=1,force_push=1e-6, force_pull=1e-2, maxiter=50):
     t1 = time.time()
     if layer is None:
         return
@@ -267,127 +286,92 @@ def adjust_text(layer,canvas,force_push=1e-6, force_pull=1e-2, maxiter=100):
     #点の座標
     points = np.array([normalized_point_position(layer,text,extent) for text in texts])
 
-    #### x-means
-    # init_center = xmeans.kmeans_plusplus_initializer(points, 2).initialize()  # 初期値決定　今回は、初期クラスタ2です
-    # xm = xmeans.xmeans(points, init_center, ccore=False)
-    # xm.process()  # クラスタリングします
-    # clusters = xm.get_clusters()
-    # cluster_centers = xm.get_centers()
-
-    #### k-means
-    input, ok = QInputDialog.getInt(QInputDialog(), "Enter Class Num", "'Number'", 4,1)
-    if ok:
-        cluster_centers, distortion = kmeans(points, int(input))
-        codes, error = vq(points, cluster_centers)
-        delta = points - cluster_centers[codes]
-        log("{}".format(delta))
-        bboxes = set_bboxes(bboxes,delta[:,0],delta[:,1])
-
-    else:
+    bboxes = initialize_by_cluster(canvas, extent, points, bboxes, center_num)
+    if not bboxes: #cancel dlg
         return
 
-    #### MeanShift
-    # ms = cluster.MeanShift()
+    dboxes = get_dboxes(points, padding=(1e-2, 1e-2))
+    n_points = len(points)
+    orig_cent = np.array([(bbox['orgx'],bbox['orgy']) for bbox in bboxes])
 
+    #log("len:{}".format(len(points)))
+    velocities = np.array([[0.0,0.0]]*n_texts)
+    velocity_decay = 0.7
+    iter = 0
+    any_overlaps = True
+    i_overlaps = True
+    log("timeA:{}".format(time.time() - t1))
+    while (any_overlaps and iter < maxiter):
+        iter = iter + 1
+        any_overlaps = False
+        # The forces get weaker over time.
+        force_push = force_push * 0.99999
+        force_pull = force_pull * 0.9999
+        for i in range(n_texts):
+            i_overlaps = False
+            f = np.array([0, 0])
+            #ラベルの中心座標
+            ci = get_midpoint(bboxes[i])
+            #log("target:{}".format(bboxes[i]['label']))
+            for j in range(n_points):
+                if i == j:
+                    # 自分自身の点とラベルが重なるなら.
+                    if overlaps(dboxes[i], bboxes[i]):
+                        any_overlaps = True
+                        i_overlaps = True
+                        f = f + repel_force(ci, points[i], force_push)
+                        #log("A:{}".format(f))
+                else:
+                    cj = get_midpoint(bboxes[j])
+                    # ラベル同士が重なる場合.
+                    if j < n_texts and overlaps(bboxes[i], bboxes[j]):
+                        any_overlaps = True
+                        i_overlaps = True
+                        f = f + repel_force(ci, cj, force_push)
+                        #log("B:{}".format(f))
+                    # ラベルが他の点と重なる場合.
+                    if overlaps(dboxes[j], bboxes[i]):
+                        any_overlaps = True
+                        i_overlaps = True
+                        f = f + repel_force(ci, points[j], force_push)
+                        #log("C:{}".format(f))
+            # ラベルがどこにも重なっていないなら、最初のラベルの位置にちょっと戻る.
+            if not i_overlaps:
+                f = f + spring_force(orig_cent[i], ci, force_pull)
+                #log("{},{}".format(orig_xy[i], ci))
+                #log("D:{}".format(f))
 
-    # ms.fit(points)
-    # labels = ms.labels_
-    # cluster_centers = ms.cluster_centers_
+            velocities[i] = velocities[i] * velocity_decay + f
+            #log("vel:{},f:{}".format(velocities[i],f))
+            #log("before:{}".format(bboxes[i]))
+            bboxes[i] = set_bbox(bboxes[i], velocities[i])
+            #log("after:{}".format(bboxes[i]))
+            # Put boxes within bounds
+            bboxes[i] = put_within_bounds(bboxes[i], xbounds, ybounds)
+            # look for line clashes
 
-    log("c:{}".format(cluster_centers))
-    # 重心表示リセット
-    vertex_items = [i for i in canvas.scene().items() if issubclass(type(i), QgsVertexMarker)]
-    for ver in vertex_items:
-        if ver in canvas.scene().items():
-            iface.mapCanvas().scene().removeItem(ver)
-    # 重心表示
-    for point in cluster_centers:
-        show_centroid(canvas, point, extent)
-
-    # dboxes = get_dboxes(points, padding=(1e-2, 1e-2))
-    # n_points = len(points)
-    # orig_cent = np.array([(bbox['orgx'],bbox['orgy']) for bbox in bboxes])
-    #
-    # #log("len:{}".format(len(points)))
-    # velocities = np.array([[0.0,0.0]]*n_texts)
-    # velocity_decay = 0.7
-    # iter = 0
-    # any_overlaps = True
-    # i_overlaps = True
-    # log("timeA:{}".format(time.time() - t1))
-    # while (any_overlaps and iter < maxiter):
-    #     iter = iter + 1
-    #     any_overlaps = False
-    #     # The forces get weaker over time.
-    #     force_push = force_push * 0.99999
-    #     force_pull = force_pull * 0.9999
-    #     for i in range(n_texts):
-    #         i_overlaps = False
-    #         f = np.array([0, 0])
-    #         #ラベルの中心座標
-    #         ci = get_midpoint(bboxes[i])
-    #         #log("target:{}".format(bboxes[i]['label']))
-    #         for j in range(n_points):
-    #             if i == j:
-    #                 # 自分自身の点とラベルが重なるなら.
-    #                 if overlaps(dboxes[i], bboxes[i]):
-    #                     any_overlaps = True
-    #                     i_overlaps = True
-    #                     f = f + repel_force(ci, points[i], force_push)
-    #                     #log("A:{}".format(f))
-    #             else:
-    #                 cj = get_midpoint(bboxes[j])
-    #                 # ラベル同士が重なる場合.
-    #                 if j < n_texts and overlaps(bboxes[i], bboxes[j]):
-    #                     any_overlaps = True
-    #                     i_overlaps = True
-    #                     f = f + repel_force(ci, cj, force_push)
-    #                     #log("B:{}".format(f))
-    #                 # ラベルが他の点と重なる場合.
-    #                 if overlaps(dboxes[j], bboxes[i]):
-    #                     any_overlaps = True
-    #                     i_overlaps = True
-    #                     f = f + repel_force(ci, points[j], force_push)
-    #                     #log("C:{}".format(f))
-    #         # ラベルがどこにも重なっていないなら、最初のラベルの位置にちょっと戻る.
-    #         if not i_overlaps:
-    #             f = f + spring_force(orig_cent[i], ci, force_pull)
-    #             #log("{},{}".format(orig_xy[i], ci))
-    #             #log("D:{}".format(f))
-    #
-    #         velocities[i] = velocities[i] * velocity_decay + f
-    #         #log("vel:{},f:{}".format(velocities[i],f))
-    #         #log("before:{}".format(bboxes[i]))
-    #         bboxes[i] = set_bbox(bboxes[i], velocities[i])
-    #         #log("after:{}".format(bboxes[i]))
-    #         # Put boxes within bounds
-    #         bboxes[i] = put_within_bounds(bboxes[i], xbounds, ybounds)
-    #         # look for line clashes
-    #
-    #         if not any_overlaps or iter % 5 == 0:
-    #             for j in range(n_points):
-    #                 cj = get_midpoint(bboxes[j])
-    #                 ci = get_midpoint(bboxes[i])
-    #                 # Switch label positions if lines overlap
-    #                 if i != j and j < n_texts and line_intersect(ci, points[i], cj, points[j]):
-    #                     #log("interA")
-    #                     any_overlaps = True
-    #                     bboxes[i] = set_bbox(bboxes[i],spring_force(cj, ci, 1))
-    #                     bboxes[j] = set_bbox(bboxes[j],spring_force(ci, cj, 1))
-    #                     # Check if resolved
-    #                     ci = get_midpoint(bboxes[i])
-    #                     cj = get_midpoint(bboxes[j])
-    #                     if line_intersect(ci, points[i], cj, points[j]):
-    #                         #log("interB")
-    #                         bboxes[i] = set_bbox(bboxes[i],spring_force(cj, ci, 1.25))
-    #                         bboxes[j] = set_bbox(bboxes[j],spring_force(ci, cj, 1.25))
+            if not any_overlaps or iter % 5 == 0:
+                for j in range(n_points):
+                    cj = get_midpoint(bboxes[j])
+                    ci = get_midpoint(bboxes[i])
+                    # Switch label positions if lines overlap
+                    if i != j and j < n_texts and line_intersect(ci, points[i], cj, points[j]):
+                        #log("interA")
+                        any_overlaps = True
+                        bboxes[i] = set_bbox(bboxes[i],spring_force(cj, ci, 1))
+                        bboxes[j] = set_bbox(bboxes[j],spring_force(ci, cj, 1))
+                        # Check if resolved
+                        ci = get_midpoint(bboxes[i])
+                        cj = get_midpoint(bboxes[j])
+                        if line_intersect(ci, points[i], cj, points[j]):
+                            #log("interB")
+                            bboxes[i] = set_bbox(bboxes[i],spring_force(cj, ci, 1.25))
+                            bboxes[j] = set_bbox(bboxes[j],spring_force(ci, cj, 1.25))
     log("iter:{}".format(iter))
-    log("timeB:{}".format(time.time() - t1))
     bboxes = transform_coord(bboxes,extent,normalized=False)
-    log("timeC:{}".format(time.time() - t1))
     move_texts(layer,canvas,bboxes)
-    set_position_column(layer,"expression")
-    log("timeD:{}".format(time.time() - t1))
+    set_position_column(layer, type="expression")
+    #log("timeD:{}".format(time.time() - t1))
 
 def is_prepared_label(layer):
     result = True

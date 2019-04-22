@@ -42,13 +42,15 @@ class LabelPositionAutomaticAdjustment(object):
             #ラベル調整の準備が出来ているか確認
             ok = AdjustText.is_prepared_label(layer)
             if ok:
-                #ラベル配置設定
-                AdjustText.set_position_column(layer,"center")
-                #ラベル位置をリセット
-                AdjustText.reset_label_position(layer, canvas)
-                layer.triggerRepaint()
-                #ラベル配置実行.リセットが再表示されてから実行する必要があるためタイマーを使用
-                QTimer.singleShot(1000, lambda: AdjustText.adjust_text(layer, canvas))
+                center_num, ok = QInputDialog.getInt(QInputDialog(), "Enter Label Centroid Number", u"ラベル配置の中心の数", 1, 1)
+                if ok:
+                    #ラベル配置設定
+                    AdjustText.set_position_column(layer)
+                    #ラベル位置をリセット
+                    AdjustText.reset_label_position(layer, canvas)
+                    layer.triggerRepaint()
+                    #ラベル配置実行.リセットが再表示されてから実行する必要があるためタイマーを使用
+                    QTimer.singleShot(1000, lambda: AdjustText.adjust_text(layer, canvas, center_num))
             else:
                 QMessageBox.information(self.iface.mainWindow(), '','ラベルの移動設定を確認してください')
         else:
