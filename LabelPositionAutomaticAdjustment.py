@@ -43,7 +43,7 @@ class LabelPositionAutomaticAdjustment(object):
             ok = AdjustText.is_prepared_label(layer)
             if ok:
                 #ラベル配置設定
-                AdjustText.set_position_column(layer)
+                AdjustText.set_position_column(layer,"center")
                 #ラベル位置をリセット
                 AdjustText.reset_label_position(layer, canvas)
                 layer.triggerRepaint()
