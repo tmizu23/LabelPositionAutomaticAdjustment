@@ -287,7 +287,7 @@ def adjust_text(layer,canvas,center_num=1,force_push=1e-6, force_pull=1e-2, maxi
     n_texts = len(texts)
     r = np.random.normal(0, force_push, n_texts)
     bboxes = get_bboxes(texts, expand=(1.05, 1.2))
-    bboxes = transform_coord(bboxes,extent,normalized=True,random=r)
+    bboxes = transform_coord(bboxes, extent, normalized=True, random=r)
     xbounds = [0, 1]
     ybounds = [0, 1]
 

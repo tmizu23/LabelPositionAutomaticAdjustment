@@ -1,6 +1,6 @@
 <RCC>
     <qresource prefix="/plugins/LabelPositionAutomaticAdjustment" >
-        <file>iconAdjustText.png</file>
+        <file>iconAdjustText.svg</file>
         <file>iconApplyStyle.svg</file>
     </qresource>
 </RCC>

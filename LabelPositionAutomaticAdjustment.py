@@ -20,7 +20,7 @@ class LabelPositionAutomaticAdjustment(object):
 
     def initGui(self):
         self.actionAdjustText = QAction(
-            QIcon(":/plugins/LabelPositionAutomaticAdjustment/iconAdjustText.png"),
+            QIcon(":/plugins/LabelPositionAutomaticAdjustment/iconAdjustText.svg"),
             u"AdjustText", self.iface.mainWindow())
         self.actionAdjustText.triggered.connect(self.runAdjustText)
         self.iface.mainWindow().findChild(QToolBar, 'mLabelToolBar').addAction(self.actionAdjustText)
