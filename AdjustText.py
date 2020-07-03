@@ -461,14 +461,19 @@ def set_label_column(layer, name):
     layer.setLabeling(QgsVectorLayerSimpleLabeling(palyr))
     layer.setLabelsEnabled(True)
 
+def get_label_column(layer):
+    subProviderIds = layer.labeling().subProviders()
+    palyr = QgsPalLayerSettings(layer.labeling().settings(subProviderIds[0]))
+    return palyr.fieldName
+
 def apply_style(layer):
-    col_list = layer.fields().names()
-    column, ok = QInputDialog.getItem(QInputDialog(), "Select Label Column", "Column:", col_list, 0, False)
-    if ok:
+    ret = QMessageBox.information(None, "Apply Style", "スタイルを適用しますか？", QMessageBox.Yes, QMessageBox.No)
+    if ret == QMessageBox.Yes:
         qml = os.path.dirname(os.path.abspath(__file__)) + os.path.sep + "label.qml"
+        column = get_label_column(layer)
         set_label_style(layer, qml)
         set_label_column(layer, column)
-        #change label name
+        # change label name
         layer.triggerRepaint()
 
 def log(msg):
